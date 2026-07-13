@@ -122,7 +122,9 @@ class WebViewSearcher(private val context: Context) {
                 wv.loadUrl(url)
             }
 
-            cont.invokeOnCancellation { cleanup() }
+            // WebView можно уничтожать только на главном потоке. При общем тайм-ауте
+            // coroutine отменяется с IO-потока, поэтому переносим cleanup в main queue.
+            cont.invokeOnCancellation { mainHandler.post { cleanup() } }
         }
     }
 

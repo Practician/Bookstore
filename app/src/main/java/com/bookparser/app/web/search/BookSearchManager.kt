@@ -9,7 +9,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -45,12 +47,18 @@ class BookSearchManager(
             return
         }
 
+        // Повторный запуск того же источника не должен оставлять старую задачу в фоне.
+        jobs.remove(siteId)?.cancel()
+
         val job = scope.launch(Dispatchers.IO) {
             try {
                 AppLogger.i(TAG, "[$siteId] Starting search on $domain")
                 val startTime = System.currentTimeMillis()
 
-                when (val outcome = parser.search(query, domain, doh)) {
+                // Z-Library перебирает зеркала через WebView. Ограничиваем весь поиск,
+                // а не каждое зеркало отдельно, чтобы интерфейс не крутился минутами.
+                val maxSearchMs = if (siteId == "zlib") 30_000L else 45_000L
+                when (val outcome = withTimeout(maxSearchMs) { parser.search(query, domain, doh) }) {
                     is SearchOutcome.Success -> {
                         val elapsed = System.currentTimeMillis() - startTime
                         AppLogger.i(TAG, "[$siteId] Found ${outcome.items.size} results in ${elapsed}ms")
@@ -67,6 +75,10 @@ class BookSearchManager(
                         withContext(Dispatchers.Main) { onError(siteId, outcome.reason) }
                     }
                 }
+            } catch (e: TimeoutCancellationException) {
+                val message = "Поиск превысил лимит времени"
+                AppLogger.e(TAG, "[$siteId] Timeout")
+                withContext(Dispatchers.Main) { onError(siteId, message) }
             } catch (e: CancellationException) {
                 AppLogger.i(TAG, "[$siteId] Search cancelled")
             } catch (e: Exception) {
@@ -77,6 +89,7 @@ class BookSearchManager(
             }
         }
         jobs[siteId] = job
+        job.invokeOnCompletion { jobs.remove(siteId, job) }
     }
 
     fun stopAll() {
