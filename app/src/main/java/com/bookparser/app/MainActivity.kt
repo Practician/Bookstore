@@ -1905,6 +1905,13 @@ class MainActivity : AppCompatActivity() {
         // антибот иногда не «прилипает»
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true)
+        // Некоторые антибот-скрипты закрывают вкладку через window.close(), после чего
+        // Android WebView остаётся на пустом about:blank. Подменяем close до запуска JS сайта.
+        androidx.webkit.WebViewCompat.addDocumentStartJavaScript(
+            wv,
+            "window.close=function(){console.warn('window.close blocked by app');};",
+            setOf("*")
+        )
 
         val urlBar = TextView(this).apply {
             text = Uri.parse(url).host ?: url
@@ -2035,7 +2042,30 @@ class MainActivity : AppCompatActivity() {
         }
 
         wv.webViewClient = object : WebViewClient() {
+            private fun blockBlankNavigation(target: String?): Boolean {
+                if (target == null) return false
+                val normalized = target.trim().lowercase()
+                if (normalized == "about:blank" || normalized.startsWith("data:text/html,<html></html>")) {
+                    AppLogger.w("PageViewer", "Blocked blank navigation from ${wv.url}")
+                    return true
+                }
+                return false
+            }
+
+            override fun shouldOverrideUrlLoading(
+                view: WebView?,
+                request: android.webkit.WebResourceRequest?
+            ): Boolean = blockBlankNavigation(request?.url?.toString())
+
+            @Suppress("DEPRECATION")
+            override fun shouldOverrideUrlLoading(view: WebView?, targetUrl: String?): Boolean =
+                blockBlankNavigation(targetUrl)
+
             override fun onPageStarted(view: WebView?, startedUrl: String?, favicon: android.graphics.Bitmap?) {
+                if (blockBlankNavigation(startedUrl)) {
+                    view?.stopLoading()
+                    return
+                }
                 progress.visibility = View.VISIBLE
                 errorView.visibility = View.GONE
                 urlBar.text = startedUrl?.let { Uri.parse(it).host } ?: urlBar.text
