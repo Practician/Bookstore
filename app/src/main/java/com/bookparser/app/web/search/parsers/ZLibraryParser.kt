@@ -14,8 +14,8 @@ class ZLibraryParser : SiteParser {
     companion object {
         private const val TAG = "ZLIB"
         private val FALLBACK_DOMAINS = listOf(
-            "ru.z-lib.fm",
             "z-lib.fm",
+            "ru.z-lib.fm",
             "z-lib.org",
             "z-library.sk",
             "z-lib.is"
@@ -24,7 +24,11 @@ class ZLibraryParser : SiteParser {
 
     override suspend fun search(query: String, domain: String, doh: DohHttpClient): SearchOutcome {
         val cleanDomain = domain.removePrefix("https://").removePrefix("http://")
-        val domainsToTry = mutableListOf(cleanDomain)
+        // z-lib.fm стабильно отвечает, тогда как региональное ru-зеркало часто висит
+        // до сетевого тайм-аута. Сначала используем основное зеркало, затем настройку
+        // пользователя и остальные запасные адреса.
+        val domainsToTry = mutableListOf("z-lib.fm")
+        if (!domainsToTry.contains(cleanDomain)) domainsToTry.add(cleanDomain)
         FALLBACK_DOMAINS.forEach { if (!domainsToTry.contains(it)) domainsToTry.add(it) }
 
         val wv = WebViewSearcher.get()
@@ -33,7 +37,7 @@ class ZLibraryParser : SiteParser {
             val searchUrl = "https://$d/s/${java.net.URLEncoder.encode(query, "UTF-8")}"
             AppLogger.i(TAG, "WebView search URL: $searchUrl")
 
-            val html = wv.fetchHtml(searchUrl, waitForStableMs = 6000, timeoutMs = 30000)
+            val html = wv.fetchHtml(searchUrl, waitForStableMs = 5000, timeoutMs = 15000)
             if (html == null) {
                 AppLogger.i(TAG, "Domain $d returned null, trying next")
                 continue
