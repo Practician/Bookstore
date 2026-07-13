@@ -1899,7 +1899,8 @@ class MainActivity : AppCompatActivity() {
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             settings.builtInZoomControls = true
             settings.displayZoomControls = false
-            settings.userAgentString = MOBILE_UA
+            settings.userAgentString =
+                com.bookparser.app.web.search.WebViewSearcher.browserUserAgent(this@MainActivity)
         }
         // Куки заглушки могут выставляться из iframe челленджа — без этого пройденный
         // антибот иногда не «прилипает»
@@ -2129,7 +2130,7 @@ class MainActivity : AppCompatActivity() {
                     setTitle(fileName)
                     setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                     setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, fileName)
-                    addRequestHeader("User-Agent", MOBILE_UA)
+                    addRequestHeader("User-Agent", wv.settings.userAgentString)
                     val cookies = CookieManager.getInstance().getCookie(dlUrl)
                     if (!cookies.isNullOrEmpty()) addRequestHeader("Cookie", cookies)
                 }

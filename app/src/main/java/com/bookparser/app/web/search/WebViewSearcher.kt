@@ -8,6 +8,7 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebSettings
 import com.bookparser.app.AppLogger
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -16,9 +17,12 @@ class WebViewSearcher(private val context: Context) {
 
     companion object {
         private const val TAG = "WV_FETCH"
-        private const val USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36"
         private var INSTANCE: WebViewSearcher? = null
+
+        fun browserUserAgent(context: Context): String =
+            WebSettings.getDefaultUserAgent(context)
+                .replace("; wv", "")
+                .replace("Version/4.0 ", "")
 
         fun init(context: Context) {
             if (INSTANCE == null) {
@@ -41,6 +45,8 @@ class WebViewSearcher(private val context: Context) {
             val mainHandler = Handler(Looper.getMainLooper())
             var webView: WebView? = null
             var stableTimer: Runnable? = null
+            var domPoll: Runnable? = null
+            var extractionStarted = false
             val startTime = System.currentTimeMillis()
 
             var timeoutRunnable: Runnable? = null
@@ -48,6 +54,7 @@ class WebViewSearcher(private val context: Context) {
             fun cleanup() {
                 timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
                 stableTimer?.let { mainHandler.removeCallbacks(it) }
+                domPoll?.let { mainHandler.removeCallbacks(it) }
                 try { webView?.destroy() } catch (_: Exception) {}
                 webView = null
             }
@@ -60,6 +67,8 @@ class WebViewSearcher(private val context: Context) {
             mainHandler.postDelayed(timeoutRunnable!!, timeoutMs)
 
             fun extractHtml(wv: WebView, loadedUrl: String?) {
+                if (extractionStarted || !cont.isActive) return
+                extractionStarted = true
                 val elapsed = System.currentTimeMillis() - startTime
                 AppLogger.i(TAG, "Extracting HTML after ${elapsed}ms from $loadedUrl")
                 wv.evaluateJavascript(
@@ -88,7 +97,7 @@ class WebViewSearcher(private val context: Context) {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.allowFileAccess = true
-                    settings.userAgentString = USER_AGENT
+                    settings.userAgentString = browserUserAgent(context)
                     settings.loadWithOverviewMode = true
                     settings.useWideViewPort = true
                 }
@@ -97,6 +106,27 @@ class WebViewSearcher(private val context: Context) {
                 android.webkit.CookieManager.getInstance().setAcceptCookie(true)
                 android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true)
                 webView = wv
+
+                // Страница Z-Library может держать незавершённые антибот/аналитические
+                // запросы, из-за чего onPageFinished не приходит, хотя результаты уже
+                // находятся в DOM. Проверяем наличие карточек независимо от load event.
+                domPoll = object : Runnable {
+                    override fun run() {
+                        if (!cont.isActive || extractionStarted) return
+                        wv.evaluateJavascript(
+                            "(function(){return document.querySelectorAll('z-bookcard').length;})()"
+                        ) { rawCount ->
+                            val count = rawCount?.trim('"')?.toIntOrNull() ?: 0
+                            if (count > 0 && cont.isActive && !extractionStarted) {
+                                AppLogger.i(TAG, "DOM poll found $count z-bookcard elements")
+                                extractHtml(wv, wv.url)
+                            } else if (cont.isActive && !extractionStarted) {
+                                mainHandler.postDelayed(this, 1000)
+                            }
+                        }
+                    }
+                }
+                mainHandler.postDelayed(domPoll!!, 1500)
 
                 wv.webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, loadedUrl: String?) {

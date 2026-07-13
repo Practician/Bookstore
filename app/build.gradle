@@ -14,8 +14,8 @@ android {
         applicationId "com.bookparser.app"
         minSdk 26
         targetSdk 34
-        versionCode 38
-        versionName "7.37"
+        versionCode 39
+        versionName "7.38"
         
         vectorDrawables { 
             useSupportLibrary = true
