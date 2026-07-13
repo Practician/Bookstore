@@ -1889,6 +1889,7 @@ class MainActivity : AppCompatActivity() {
         val dialog = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
 
         val wv = WebView(this).apply {
+            setBackgroundColor(0xFFFFFFFF.toInt())
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.loadWithOverviewMode = true
@@ -1943,16 +1944,106 @@ class MainActivity : AppCompatActivity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFFFFFFFF.toInt())
+            layoutParams = android.view.ViewGroup.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            )
             addView(topBar)
-            addView(wv, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        }
+
+        val pageContainer = android.widget.FrameLayout(this).apply {
+            setBackgroundColor(0xFFFFFFFF.toInt())
+            addView(wv, android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
             ))
+        }
+        val progress = android.widget.ProgressBar(this).apply {
+            isIndeterminate = true
+        }
+        pageContainer.addView(progress, android.widget.FrameLayout.LayoutParams(
+            dp(48), dp(48), android.view.Gravity.CENTER
+        ))
+
+        val errorView = TextView(this).apply {
+            visibility = View.GONE
+            gravity = android.view.Gravity.CENTER
+            setTextColor(0xFF202124.toInt())
+            setBackgroundColor(0xFFFFFFFF.toInt())
+            textSize = 16f
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+            setOnClickListener {
+                visibility = View.GONE
+                progress.visibility = View.VISIBLE
+                wv.reload()
+            }
+        }
+        pageContainer.addView(errorView, android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+        root.addView(pageContainer, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
+
+        fun showLoadError(message: String) {
+            progress.visibility = View.GONE
+            errorView.text = "$message\n\nНажмите, чтобы повторить"
+            errorView.visibility = View.VISIBLE
+            AppLogger.e("PageViewer", "$message ($url)")
         }
 
         wv.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, startedUrl: String?, favicon: android.graphics.Bitmap?) {
+                progress.visibility = View.VISIBLE
+                errorView.visibility = View.GONE
+                urlBar.text = startedUrl?.let { Uri.parse(it).host } ?: urlBar.text
+            }
+
             override fun onPageFinished(view: WebView?, loadedUrl: String?) {
+                progress.visibility = View.GONE
                 urlBar.text = loadedUrl?.let { Uri.parse(it).host } ?: urlBar.text
                 CookieManager.getInstance().flush()
+            }
+
+            override fun onReceivedError(
+                view: WebView?,
+                request: android.webkit.WebResourceRequest?,
+                error: android.webkit.WebResourceError?
+            ) {
+                if (request?.isForMainFrame == true) {
+                    showLoadError("Не удалось открыть страницу: ${error?.description ?: "ошибка сети"}")
+                }
+            }
+
+            override fun onReceivedHttpError(
+                view: WebView?,
+                request: android.webkit.WebResourceRequest?,
+                errorResponse: android.webkit.WebResourceResponse?
+            ) {
+                if (request?.isForMainFrame == true) {
+                    showLoadError("Сайт вернул ошибку HTTP ${errorResponse?.statusCode ?: ""}")
+                }
+            }
+
+            override fun onReceivedSslError(
+                view: WebView?,
+                handler: android.webkit.SslErrorHandler?,
+                error: android.net.http.SslError?
+            ) {
+                handler?.cancel()
+                showLoadError("Ошибка сертификата сайта")
+            }
+        }
+
+        wv.webChromeClient = object : WebChromeClient() {
+            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                progress.visibility = if (newProgress < 100 && errorView.visibility != View.VISIBLE) {
+                    View.VISIBLE
+                } else {
+                    View.GONE
+                }
             }
         }
 
@@ -1985,6 +2076,10 @@ class MainActivity : AppCompatActivity() {
             try { (wv.parent as? android.view.ViewGroup)?.removeView(wv); wv.destroy() } catch (_: Exception) {}
         }
         dialog.show()
+        dialog.window?.setLayout(
+            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+            android.view.WindowManager.LayoutParams.MATCH_PARENT
+        )
         wv.loadUrl(url)
     }
 
