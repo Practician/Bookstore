@@ -185,6 +185,22 @@
         .btn-danger { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
         .btn-info { background: #0ea5e9; }
 
+        .download-picker { position: relative; flex: 1; min-width: 180px; }
+        .download-picker summary { list-style: none; margin: 0; }
+        .download-picker summary::-webkit-details-marker { display: none; }
+        .download-menu {
+            position: absolute; z-index: 30; left: 0; right: 0; bottom: calc(100% + 8px);
+            padding: 8px; border-radius: 14px; background: #182235;
+            border: 1px solid var(--card-border); box-shadow: 0 16px 36px rgba(0,0,0,.38);
+        }
+        .download-menu button {
+            width: 100%; border: 0; border-radius: 10px; padding: 11px 12px;
+            text-align: left; color: var(--text); background: transparent;
+            font-size: 13px; font-weight: 650; cursor: pointer;
+        }
+        .download-menu button:active { background: rgba(255,255,255,.09); }
+        .download-menu small { display: block; margin-top: 3px; color: var(--sub); font-weight: 400; }
+
         .annotation-box, .bb-box {
             background: rgba(15, 23, 42, 0.6);
             border: 1px solid var(--card-border);
@@ -868,8 +884,15 @@
             </div>
         </div>
 
-        <div style="margin:0 12px 16px; display:flex; gap:8px;">
-            <button class="btn btn-success" style="flex:1" onclick="downloadZip()">📦 Скачать все FB2.ZIP</button>
+        <div style="margin:0 12px 16px; display:flex; gap:8px; align-items:flex-start;">
+            <details class="download-picker" id="downloadPicker">
+                <summary class="btn btn-success">📦 Скачать книги ▾</summary>
+                <div class="download-menu">
+                    <button onclick="downloadAllBooks('fb2')">FB2.ZIP<small>Скачать все книги в архивах FB2.ZIP</small></button>
+                    <button onclick="downloadAllBooks('epub')">EPUB.ZIP<small>Сконвертировать FB2 в EPUB</small></button>
+                    <button onclick="downloadAllBooks('both')">FB2.ZIP + EPUB.ZIP<small>Скачать оба варианта</small></button>
+                </div>
+            </details>
             <button class="btn" style="flex:1; background: linear-gradient(135deg,#7c3aed,#4f46e5);" onclick="downloadAllCovers()">🖼 Скачать обложки</button>
         </div>
 
@@ -882,15 +905,6 @@
         <div class="card">
             <h3>BB-код для 4PDA</h3>
             <textarea id="bbArea" class="bb-box" placeholder="Загрузите книги на вкладке «Загрузка»…"></textarea>
-        </div>
-
-        <div class="card" style="margin-bottom: 16px;">
-            <h3 style="margin-top:0; margin-bottom:8px; font-size:14px;">Формат публикации (для FB2)</h3>
-            <div style="display:flex; gap:16px; align-items:center; font-size:13px;">
-                <label style="cursor:pointer;"><input type="radio" name="publishFormat" value="fb2" checked> Как есть (FB2)</label>
-                <label style="cursor:pointer;"><input type="radio" name="publishFormat" value="epub"> Сконвертировать в EPUB</label>
-                <label style="cursor:pointer;"><input type="radio" name="publishFormat" value="both"> FB2 + EPUB</label>
-            </div>
         </div>
 
         <div style="margin:0 12px 16px; display: flex; flex-wrap: wrap; gap: 8px;">
@@ -1270,8 +1284,11 @@
                 currentBook.originalFilename = file.name;
                 addBook();
             } else if (lo.endsWith('.epub')) {
-                const zip = await JSZip.loadAsync(file);
+                const originalBuffer = await file.arrayBuffer();
+                const zip = await JSZip.loadAsync(originalBuffer.slice(0));
                 await parseEPUB(zip);
+                currentBook.originalBuffer = originalBuffer;
+                currentBook.originalExtension = 'epub';
                 currentBook.originalFilename = file.name;
                 addBook();
             } else if (lo.endsWith('.zip')) {
@@ -2215,50 +2232,14 @@
                 }
                 bookData.originalPostUrl = b0.originalPostUrl || currentBook?.originalPostUrl || '';
 
-                const formatSelect = document.querySelector('input[name="publishFormat"]:checked')?.value || 'fb2';
-
                 for (const b of selectedBooks) {
                     try {
-                        const baseName = makeFilename(b);
-                        
-                        // Если это PDF или уже EPUB в виде буфера, то конвертация не нужна
-                        const isNonFb2Original = b.originalBuffer && (!b.originalFB2);
-
-                        if (isNonFb2Original) {
-                            let fileName, fileBase64, fileMime;
-                            // PDF / EPUB — упаковываем в zip
-                            const arr = new Uint8Array(b.originalBuffer);
-                            const zip = new JSZip();
-                            const ext = b.originalFilename ? (b.originalFilename.toLowerCase().endsWith('.epub') ? '.epub' : '.pdf') : '.pdf';
-                            zip.file(baseName + ext, arr);
-                            fileBase64 = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE' });
-                            fileName = baseName + ext + '.zip';
-                            fileMime = 'application/zip';
-
+                        // Публикация всегда использует безопасный формат FB2.
+                        const files = await prepareBookDownloads(b, 'fb2');
+                        for (const file of files) {
                             if (window.AndroidBridge && AndroidBridge.stageBookFile) {
-                                AndroidBridge.stageBookFile(fileName, fileBase64, fileMime);
+                                AndroidBridge.stageBookFile(file.name, file.base64, 'application/zip');
                                 await new Promise(r => setTimeout(r, 500));
-                            }
-                        } else {
-                            // FB2 — обрабатываем в зависимости от выбранного формата
-                            const fb2Content = b.originalFB2 || generateFB2(b);
-                            
-                            if (formatSelect === 'fb2' || formatSelect === 'both') {
-                                const zip = new JSZip();
-                                zip.file(baseName + '.fb2', fb2Content);
-                                const fileBase64 = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE' });
-                                if (window.AndroidBridge && AndroidBridge.stageBookFile) {
-                                    AndroidBridge.stageBookFile(baseName + '.fb2.zip', fileBase64, 'application/zip');
-                                    await new Promise(r => setTimeout(r, 500));
-                                }
-                            }
-
-                            if (formatSelect === 'epub' || formatSelect === 'both') {
-                                const epubBase64 = await convertFb2ToEpubBase64(b, fb2Content, baseName);
-                                if (window.AndroidBridge && AndroidBridge.stageBookFile) {
-                                    AndroidBridge.stageBookFile(baseName + '.epub.zip', epubBase64, 'application/zip');
-                                    await new Promise(r => setTimeout(r, 500));
-                                }
                             }
                         }
                     } catch (err) {
@@ -2321,64 +2302,180 @@
         // ════════════════════════════════════════════════
         //  DOWNLOAD ZIP
         // ════════════════════════════════════════════════
-        async function downloadSingleBook(idx) {
-            const b = books[idx];
-            if (!b) return;
-            status('⏳ Подготовка ' + (b.title || 'книги') + '...', 'inf');
-            try {
-                const baseName = makeFilename(b);
+        function escapeXml(value) {
+            return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+        }
 
-                // Если оригинальный файл — PDF, упаковываем в zip
-                if (b.originalBuffer) {
-                    const pdfArray = new Uint8Array(b.originalBuffer);
-                    const zip = new JSZip();
-                    zip.file(baseName + '.pdf', pdfArray);
-                    const pdfZipBase64 = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE' });
-                    const finalName = baseName + '.pdf.zip';
-                    if (window.AndroidBridge && AndroidBridge.saveFile) {
-                        AndroidBridge.saveFile(pdfZipBase64, finalName, 'application/zip');
-                        status('✅ ' + finalName + ' отправлен', 'ok');
-                    } else {
-                        const link = document.createElement('a');
-                        link.href = 'data:application/zip;base64,' + pdfZipBase64;
-                        link.download = finalName;
-                        link.click();
-                        status('✅ Скачано: ' + finalName, 'ok');
-                    }
-                    return;
-                }
+        function originalExtension(book) {
+            if (book.originalExtension) return String(book.originalExtension).toLowerCase();
+            const match = String(book.originalFilename || '').toLowerCase().match(/\.(fb2|epub|pdf)(?:\.zip)?$/);
+            return match ? match[1] : 'fb2';
+        }
 
-                // FB2/EPUB — упаковываем в zip
-                const zip = new JSZip();
-                let fb2Content = (b.originalFB2 || generateFB2(b));
-                zip.file(baseName + '.fb2', fb2Content);
-                const base64 = await zip.generateAsync({ type: "base64", compression: "DEFLATE" });
-                const finalName = baseName + '.fb2.zip';
+        async function packageFileBase64(fileName, content) {
+            const zip = new JSZip();
+            zip.file(fileName, content);
+            return zip.generateAsync({ type: 'base64', compression: 'DEFLATE' });
+        }
 
-                if (window.AndroidBridge && AndroidBridge.saveFile) {
-                    AndroidBridge.saveFile(base64, finalName, 'application/zip');
-                    status('✅ ' + finalName + ' отправлен', 'ok');
-                } else {
-                    const link = document.createElement('a');
-                    link.href = 'data:application/zip;base64,' + base64;
-                    link.download = finalName;
-                    link.click();
-                    status('✅ Скачано: ' + finalName, 'ok');
-                }
-            } catch (e) {
-                console.error('Download error for ' + b.title + ': ' + e);
-                status('❌ Ошибка скачивания', 'err');
+        function fb2NodeToXhtml(node, imagePaths) {
+            if (node.nodeType === 3) return escapeXml(node.nodeValue);
+            if (node.nodeType !== 1) return '';
+            const name = (node.localName || node.nodeName || '').toLowerCase();
+            const content = Array.from(node.childNodes).map(n => fb2NodeToXhtml(n, imagePaths)).join('');
+            if (name === 'image') {
+                const href = node.getAttribute('l:href') || node.getAttribute('xlink:href') ||
+                    node.getAttributeNS('http://www.w3.org/1999/xlink', 'href') || '';
+                const path = imagePaths[href.replace(/^#/, '')];
+                return path ? `<img src="${escapeXml(path)}" alt=""/>` : '';
+            }
+            const tags = {
+                section: 'section', title: 'h2', subtitle: 'h3', p: 'p', emphasis: 'em',
+                strong: 'strong', strikethrough: 's', poem: 'blockquote', stanza: 'div', v: 'p'
+            };
+            if (name === 'empty-line') return '<br/>';
+            if (name === 'a') {
+                const href = node.getAttribute('l:href') || node.getAttribute('xlink:href') || '#';
+                return `<a href="${escapeXml(href)}">${content}</a>`;
+            }
+            const tag = tags[name];
+            return tag ? `<${tag}>${content}</${tag}>` : content;
+        }
+
+        async function createEpubBytes(book, fb2Content, baseName) {
+            const doc = new DOMParser().parseFromString(fb2Content, 'text/xml');
+            if (doc.querySelector('parsererror')) throw new Error('Некорректный FB2');
+
+            const epub = new JSZip();
+            epub.file('mimetype', 'application/epub+zip', { compression: 'STORE' });
+            epub.file('META-INF/container.xml', '<?xml version="1.0" encoding="UTF-8"?>' +
+                '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">' +
+                '<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>' +
+                '</rootfiles></container>');
+
+            const imagePaths = {};
+            const imageItems = [];
+            let imageIndex = 0;
+            Array.from(doc.querySelectorAll('binary')).forEach(binary => {
+                const mime = binary.getAttribute('content-type') || '';
+                const data = (binary.textContent || '').replace(/\s/g, '');
+                if (!mime.startsWith('image/') || !data) return;
+                const id = binary.getAttribute('id') || `image-${imageIndex + 1}`;
+                const ext = mime.includes('png') ? 'png' : mime.includes('gif') ? 'gif' : mime.includes('webp') ? 'webp' : 'jpg';
+                const path = `images/image-${++imageIndex}.${ext}`;
+                imagePaths[id] = path;
+                imageItems.push({ id: `img${imageIndex}`, path, mime, data });
+                epub.file('OEBPS/' + path, data, { base64: true });
+            });
+
+            const body = doc.querySelector('body');
+            let sections = body ? Array.from(body.children).filter(n => (n.localName || '').toLowerCase() === 'section') : [];
+            if (!sections.length && body) sections = [body];
+            const chapters = sections.map((section, index) => {
+                const titleNode = Array.from(section.children || []).find(n => (n.localName || '').toLowerCase() === 'title');
+                const title = (titleNode?.textContent || '').trim() || (sections.length > 1 ? `Глава ${index + 1}` : (book.title || 'Книга'));
+                const file = `chapter-${index + 1}.xhtml`;
+                const content = fb2NodeToXhtml(section, imagePaths) || '<p></p>';
+                epub.file('OEBPS/' + file, '<?xml version="1.0" encoding="UTF-8"?>' +
+                    '<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head>' +
+                    `<title>${escapeXml(title)}</title><link rel="stylesheet" type="text/css" href="style.css"/>` +
+                    `</head><body>${content}</body></html>`);
+                return { id: `chapter${index + 1}`, file, title };
+            });
+            if (!chapters.length) {
+                const file = 'chapter-1.xhtml';
+                const text = book.bodyText || '';
+                const content = text.split(/\n\s*\n/).filter(Boolean).map(p => `<p>${escapeXml(p.trim())}</p>`).join('') || '<p></p>';
+                epub.file('OEBPS/' + file, `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>${escapeXml(book.title || 'Книга')}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body>${content}</body></html>`);
+                chapters.push({ id: 'chapter1', file, title: book.title || 'Книга' });
+            }
+            epub.file('OEBPS/style.css', 'body{font-family:serif;line-height:1.45;margin:5%;}img{max-width:100%;height:auto;}h2,h3{text-align:center;}');
+
+            const title = escapeXml(book.title || 'Без названия');
+            const author = escapeXml(book.author || 'Неизвестный автор');
+            const lang = escapeXml(book.lang || 'ru');
+            const uid = escapeXml('bookstore-' + baseName);
+            const coverHref = doc.querySelector('coverpage image')?.getAttribute('l:href') ||
+                doc.querySelector('coverpage image')?.getAttributeNS('http://www.w3.org/1999/xlink', 'href') || '';
+            const coverPath = imagePaths[coverHref.replace(/^#/, '')];
+            const coverItem = imageItems.find(item => item.path === coverPath);
+            const manifest = chapters.map(c => `<item id="${c.id}" href="${c.file}" media-type="application/xhtml+xml"/>`).join('') +
+                imageItems.map(item => `<item id="${item.id}" href="${item.path}" media-type="${escapeXml(item.mime)}"${item === coverItem ? ' properties="cover-image"' : ''}/>`).join('');
+            const spine = chapters.map(c => `<itemref idref="${c.id}"/>`).join('');
+            const modified = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+            epub.file('OEBPS/content.opf', `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="pub-id" version="3.0">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="pub-id">${uid}</dc:identifier><dc:title>${title}</dc:title><dc:creator>${author}</dc:creator><dc:language>${lang}</dc:language><meta property="dcterms:modified">${modified}</meta></metadata>
+<manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="css" href="style.css" media-type="text/css"/>${manifest}</manifest><spine>${spine}</spine></package>`);
+            const navItems = chapters.map(c => `<li><a href="${c.file}">${escapeXml(c.title)}</a></li>`).join('');
+            epub.file('OEBPS/nav.xhtml', `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>${title}</title></head><body><nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops"><h1>${title}</h1><ol>${navItems}</ol></nav></body></html>`);
+            return epub.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+        }
+
+        async function prepareBookDownloads(book, mode) {
+            const baseName = makeFilename(book);
+            const ext = originalExtension(book);
+            if (ext === 'pdf' && book.originalBuffer) {
+                return [{ name: baseName + '.pdf.zip', base64: await packageFileBase64(baseName + '.pdf', new Uint8Array(book.originalBuffer)) }];
+            }
+
+            const files = [];
+            const fb2Content = book.originalFB2 || generateFB2(book);
+            if (mode === 'fb2' || mode === 'both') {
+                files.push({ name: baseName + '.fb2.zip', base64: await packageFileBase64(baseName + '.fb2', fb2Content) });
+            }
+            if (mode === 'epub' || mode === 'both') {
+                const epubBytes = ext === 'epub' && book.originalBuffer
+                    ? new Uint8Array(book.originalBuffer)
+                    : await createEpubBytes(book, fb2Content, baseName);
+                files.push({ name: baseName + '.epub.zip', base64: await packageFileBase64(baseName + '.epub', epubBytes) });
+            }
+            return files;
+        }
+
+        function savePreparedFile(file) {
+            if (window.AndroidBridge && AndroidBridge.saveFile) {
+                AndroidBridge.saveFile(file.base64, file.name, 'application/zip');
+            } else {
+                const link = document.createElement('a');
+                link.href = 'data:application/zip;base64,' + file.base64;
+                link.download = file.name;
+                link.click();
             }
         }
 
-        async function downloadZip() {
-            if (!books.length) { status('❌ Нет книг', 'err'); return; }
-            status('🚀 Запускаю массовую загрузку...', 'inf');
-            for (let i = 0; i < books.length; i++) {
-                await downloadSingleBook(i);
-                await new Promise(r => setTimeout(r, 600));
+        async function downloadSingleBook(idx, mode = 'fb2', quiet = false) {
+            const book = books[idx];
+            if (!book) return 0;
+            if (!quiet) status('⏳ Подготовка ' + (book.title || 'книги') + '…', 'inf');
+            try {
+                const files = await prepareBookDownloads(book, mode);
+                for (const file of files) {
+                    savePreparedFile(file);
+                    await new Promise(r => setTimeout(r, 350));
+                }
+                if (!quiet) status('✅ Подготовлено файлов: ' + files.length, 'ok');
+                return files.length;
+            } catch (e) {
+                console.error('Download error for ' + book.title + ': ' + e);
+                if (!quiet) status('❌ Ошибка скачивания: ' + e.message, 'err');
+                throw e;
             }
-            status('✅ Завершена загрузка ' + books.length + ' книг', 'ok');
+        }
+
+        async function downloadAllBooks(mode) {
+            document.getElementById('downloadPicker')?.removeAttribute('open');
+            if (!books.length) { status('❌ Нет книг', 'err'); return; }
+            let saved = 0, failed = 0;
+            for (let i = 0; i < books.length; i++) {
+                status(`⏳ Подготовка ${i + 1}/${books.length}: ${books[i].title || 'книга'}…`, 'inf');
+                try { saved += await downloadSingleBook(i, mode, true); }
+                catch (e) { failed++; }
+                await new Promise(r => setTimeout(r, 450));
+            }
+            if (failed) status(`⚠️ Сохранено файлов: ${saved}, ошибок: ${failed}`, 'warn');
+            else status(`✅ Сохранено файлов: ${saved}`, 'ok');
         }
 
         async function downloadAllCovers() {
