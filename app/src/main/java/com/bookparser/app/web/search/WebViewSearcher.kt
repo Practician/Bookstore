@@ -67,6 +67,9 @@ class WebViewSearcher(private val context: Context) {
                 ) { raw ->
                     val html = decodeJsString(raw)
                     AppLogger.i(TAG, "Got ${html?.length ?: 0} chars from $loadedUrl")
+                    // Сбрасываем куки на диск до destroy() — иначе cf_clearance
+                    // может потеряться вместе с уничтоженным WebView
+                    android.webkit.CookieManager.getInstance().flush()
                     cleanup()
                     if (cont.isActive) cont.resume(html)
                 }
@@ -89,6 +92,10 @@ class WebViewSearcher(private val context: Context) {
                     settings.loadWithOverviewMode = true
                     settings.useWideViewPort = true
                 }
+                // Куки антибот-заглушки часто ставятся из iframe челленджа:
+                // без third-party cookies проход не сохраняется между запросами
+                android.webkit.CookieManager.getInstance().setAcceptCookie(true)
+                android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true)
                 webView = wv
 
                 wv.webViewClient = object : WebViewClient() {

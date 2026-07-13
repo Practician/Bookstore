@@ -1882,6 +1882,116 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ════════════════════════════════════════════════
+    //  ВСТРОЕННЫЙ ПРОСМОТРЩИК СТРАНИЦ (для результатов поиска)
+    // ════════════════════════════════════════════════
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun openUrlInApp(url: String) {
+        val dialog = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+
+        val wv = WebView(this).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.loadWithOverviewMode = true
+            settings.useWideViewPort = true
+            settings.builtInZoomControls = true
+            settings.displayZoomControls = false
+            settings.userAgentString = MOBILE_UA
+        }
+        // Куки заглушки могут выставляться из iframe челленджа — без этого пройденный
+        // антибот иногда не «прилипает»
+        CookieManager.getInstance().setAcceptCookie(true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true)
+
+        val urlBar = TextView(this).apply {
+            text = Uri.parse(url).host ?: url
+            setTextColor(0xFFECECEC.toInt())
+            textSize = 14f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setPadding(16, 0, 16, 0)
+        }
+
+        fun makeBtn(label: String, onClick: () -> Unit) = Button(this).apply {
+            text = label
+            textSize = 16f
+            setTextColor(0xFFECECEC.toInt())
+            setBackgroundColor(0x00000000)
+            minWidth = 0
+            minimumWidth = 0
+            setPadding(28, 0, 28, 0)
+            setOnClickListener { onClick() }
+        }
+
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF1B1E24.toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48)
+            )
+            addView(makeBtn("←") { if (wv.canGoBack()) wv.goBack() else dialog.dismiss() })
+            addView(urlBar)
+            // Фолбэк: принудительно открыть во внешнем браузере
+            addView(makeBtn("🌐") {
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(wv.url ?: url)))
+                } catch (_: Exception) {}
+            })
+            addView(makeBtn("✕") { dialog.dismiss() })
+        }
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(topBar)
+            addView(wv, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            ))
+        }
+
+        wv.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, loadedUrl: String?) {
+                urlBar.text = loadedUrl?.let { Uri.parse(it).host } ?: urlBar.text
+                CookieManager.getInstance().flush()
+            }
+        }
+
+        // Скачивание прямо со страницы книги — через DownloadManager с куками и тем же UA
+        wv.setDownloadListener { dlUrl, _, contentDisposition, mimetype, _ ->
+            try {
+                val fileName = android.webkit.URLUtil.guessFileName(dlUrl, contentDisposition, mimetype)
+                val req = android.app.DownloadManager.Request(Uri.parse(dlUrl)).apply {
+                    setTitle(fileName)
+                    setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, fileName)
+                    addRequestHeader("User-Agent", MOBILE_UA)
+                    val cookies = CookieManager.getInstance().getCookie(dlUrl)
+                    if (!cookies.isNullOrEmpty()) addRequestHeader("Cookie", cookies)
+                }
+                (getSystemService(DOWNLOAD_SERVICE) as android.app.DownloadManager).enqueue(req)
+                Toast.makeText(this, "Скачивание: $fileName", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(this, "Ошибка скачивания: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        dialog.setContentView(root)
+        dialog.setOnKeyListener { _, keyCode, event ->
+            if (keyCode == android.view.KeyEvent.KEYCODE_BACK && event.action == android.view.KeyEvent.ACTION_UP) {
+                if (wv.canGoBack()) { wv.goBack(); true } else { dialog.dismiss(); true }
+            } else false
+        }
+        dialog.setOnDismissListener {
+            try { (wv.parent as? android.view.ViewGroup)?.removeView(wv); wv.destroy() } catch (_: Exception) {}
+        }
+        dialog.show()
+        wv.loadUrl(url)
+    }
+
+    private fun dp(v: Int): Int =
+        (v * resources.displayMetrics.density).toInt()
+
+    // ════════════════════════════════════════════════
     //  SEARCH BRIDGE (JS ↔ Kotlin для поиска книг)
     // ════════════════════════════════════════════════
     inner class SearchBridge {
@@ -1942,12 +2052,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        /** Открывает URL в браузере устройства */
+        /**
+         * Открывает URL во встроенном просмотрщике приложения.
+         * ВАЖНО: антибот-заглушка Z-Library ("Один момент…") уже пройдена
+         * скрытым WebView во время поиска, и её куки лежат в CookieManager
+         * приложения с привязкой к MOBILE_UA. Внешний браузер этих кук не
+         * видит и виснет на заглушке, поэтому открываем страницу внутри.
+         */
         @android.webkit.JavascriptInterface
         fun openInBrowser(url: String) {
-            runOnUiThread {
-                startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)))
-            }
+            runOnUiThread { openUrlInApp(url) }
         }
 
         /** Возвращает сохранённые домены из SharedPreferences */
