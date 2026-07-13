@@ -1891,9 +1891,12 @@ class MainActivity : AppCompatActivity() {
         val wv = WebView(this).apply {
             setBackgroundColor(0xFFFFFFFF.toInt())
             settings.javaScriptEnabled = true
+            settings.javaScriptCanOpenWindowsAutomatically = true
             settings.domStorageEnabled = true
+            settings.databaseEnabled = true
             settings.loadWithOverviewMode = true
             settings.useWideViewPort = true
+            settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             settings.builtInZoomControls = true
             settings.displayZoomControls = false
             settings.userAgentString = MOBILE_UA
@@ -1994,17 +1997,58 @@ class MainActivity : AppCompatActivity() {
             AppLogger.e("PageViewer", "$message ($url)")
         }
 
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        var blankPageRetries = 0
+        val loadTimeout = Runnable {
+            if (progress.visibility == View.VISIBLE && errorView.visibility != View.VISIBLE) {
+                showLoadError("Сайт не ответил за 25 секунд")
+                wv.stopLoading()
+            }
+        }
+
+        fun scheduleLoadTimeout() {
+            mainHandler.removeCallbacks(loadTimeout)
+            mainHandler.postDelayed(loadTimeout, 25_000)
+        }
+
+        fun verifyPageContent(view: WebView, loadedUrl: String?) {
+            mainHandler.postDelayed({
+                if (!dialog.isShowing) return@postDelayed
+                view.evaluateJavascript(
+                    "(function(){return JSON.stringify({title:document.title||'',text:(document.body&&document.body.innerText||'').length,html:(document.documentElement&&document.documentElement.outerHTML||'').length,url:location.href});})()"
+                ) { raw ->
+                    AppLogger.i("PageViewer", "Loaded $loadedUrl, DOM=$raw")
+                    val emptyDocument = raw == null || raw == "null" ||
+                        Regex("\\\"html\\\":(\\d+)").find(raw)?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { it < 200 } != false
+                    if (emptyDocument && errorView.visibility != View.VISIBLE) {
+                        if (blankPageRetries++ == 0) {
+                            AppLogger.w("PageViewer", "Blank document, retrying without cache: $loadedUrl")
+                            progress.visibility = View.VISIBLE
+                            view.reload()
+                            scheduleLoadTimeout()
+                        } else {
+                            showLoadError("Сайт вернул пустую страницу")
+                        }
+                    }
+                }
+            }, 2_500)
+        }
+
         wv.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, startedUrl: String?, favicon: android.graphics.Bitmap?) {
                 progress.visibility = View.VISIBLE
                 errorView.visibility = View.GONE
                 urlBar.text = startedUrl?.let { Uri.parse(it).host } ?: urlBar.text
+                AppLogger.i("PageViewer", "Opening: $startedUrl")
+                scheduleLoadTimeout()
             }
 
             override fun onPageFinished(view: WebView?, loadedUrl: String?) {
+                mainHandler.removeCallbacks(loadTimeout)
                 progress.visibility = View.GONE
                 urlBar.text = loadedUrl?.let { Uri.parse(it).host } ?: urlBar.text
                 CookieManager.getInstance().flush()
+                if (view != null) verifyPageContent(view, loadedUrl)
             }
 
             override fun onReceivedError(
@@ -2073,6 +2117,7 @@ class MainActivity : AppCompatActivity() {
             } else false
         }
         dialog.setOnDismissListener {
+            mainHandler.removeCallbacksAndMessages(null)
             try { (wv.parent as? android.view.ViewGroup)?.removeView(wv); wv.destroy() } catch (_: Exception) {}
         }
         dialog.show()
