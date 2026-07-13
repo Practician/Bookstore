@@ -1888,7 +1888,13 @@ class MainActivity : AppCompatActivity() {
     private fun openUrlInApp(url: String) {
         val dialog = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
 
-        val wv = WebView(this).apply {
+        val targetHost = Uri.parse(url).host.orEmpty()
+        val isZLibrary = targetHost.contains("z-lib") || targetHost.contains("z-library")
+        val retainedSearchWebView = if (isZLibrary) {
+            com.bookparser.app.web.search.WebViewSearcher.get().takeSessionWebView(url)
+        } else null
+        val wv = retainedSearchWebView ?: WebView(this)
+        wv.apply {
             setBackgroundColor(0xFFFFFFFF.toInt())
             settings.javaScriptEnabled = true
             settings.javaScriptCanOpenWindowsAutomatically = true
@@ -1902,6 +1908,10 @@ class MainActivity : AppCompatActivity() {
             settings.userAgentString =
                 com.bookparser.app.web.search.WebViewSearcher.browserUserAgent(this@MainActivity)
         }
+        AppLogger.i(
+            "PageViewer",
+            if (retainedSearchWebView != null) "Using Z-Library search session" else "Using new WebView"
+        )
         // Куки заглушки могут выставляться из iframe челленджа — без этого пройденный
         // антибот иногда не «прилипает»
         CookieManager.getInstance().setAcceptCookie(true)

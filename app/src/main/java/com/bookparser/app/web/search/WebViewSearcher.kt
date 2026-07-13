@@ -15,6 +15,9 @@ import kotlin.coroutines.resume
 
 class WebViewSearcher(private val context: Context) {
 
+    private var retainedWebView: WebView? = null
+    private var retainedHost: String? = null
+
     companion object {
         private const val TAG = "WV_FETCH"
         private var INSTANCE: WebViewSearcher? = null
@@ -32,6 +35,18 @@ class WebViewSearcher(private val context: Context) {
 
         fun get(): WebViewSearcher = INSTANCE
             ?: throw IllegalStateException("WebViewSearcher not initialized. Call init(context) first.")
+    }
+
+    fun takeSessionWebView(url: String): WebView? {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        val requestedHost = android.net.Uri.parse(url).host
+        if (requestedHost == null || requestedHost != retainedHost) return null
+        return retainedWebView.also {
+            retainedWebView = null
+            retainedHost = null
+            (it?.parent as? android.view.ViewGroup)?.removeView(it)
+            if (it != null) AppLogger.i(TAG, "Reusing search WebView for $url")
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -59,6 +74,19 @@ class WebViewSearcher(private val context: Context) {
                 webView = null
             }
 
+            fun retainForViewer(wv: WebView, loadedUrl: String?) {
+                timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+                stableTimer?.let { mainHandler.removeCallbacks(it) }
+                domPoll?.let { mainHandler.removeCallbacks(it) }
+                retainedWebView?.let { old ->
+                    if (old !== wv) try { old.destroy() } catch (_: Exception) {}
+                }
+                retainedWebView = wv
+                retainedHost = loadedUrl?.let { android.net.Uri.parse(it).host }
+                webView = null
+                AppLogger.i(TAG, "Retained WebView session for $retainedHost")
+            }
+
             timeoutRunnable = Runnable {
                 AppLogger.w(TAG, "Timeout after ${timeoutMs}ms for $url")
                 cleanup()
@@ -79,7 +107,7 @@ class WebViewSearcher(private val context: Context) {
                     // Сбрасываем куки на диск до destroy() — иначе cf_clearance
                     // может потеряться вместе с уничтоженным WebView
                     android.webkit.CookieManager.getInstance().flush()
-                    cleanup()
+                    retainForViewer(wv, loadedUrl)
                     if (cont.isActive) cont.resume(html)
                 }
             }
@@ -93,6 +121,11 @@ class WebViewSearcher(private val context: Context) {
             }
 
             mainHandler.post {
+                retainedWebView?.let {
+                    try { it.destroy() } catch (_: Exception) {}
+                    retainedWebView = null
+                    retainedHost = null
+                }
                 val wv = WebView(context).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
