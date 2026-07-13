@@ -66,6 +66,21 @@ class ParsersTest {
     }
 
     @Test
+    fun zlibParser_rejectsHiddenBookcardOnNoResultsPage() {
+        val html = """
+            <html><body>
+            <div>On your request nothing has been found. Do you want to create a Z-Alert?</div>
+            <z-bookcard href="/book/session-token/query.html" download="/dl/session-token">
+                <div slot="title">Shanghai Foxtrot</div>
+                <div slot="author"></div>
+            </z-bookcard>
+            </body></html>
+        """.trimIndent()
+
+        assertTrue(ZLibraryParser.isNoResultsPage(html))
+    }
+
+    @Test
     fun annasArchiveParser_findsMd5Links() {
         val html = """
             <html><body>

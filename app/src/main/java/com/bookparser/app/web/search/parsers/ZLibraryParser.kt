@@ -20,6 +20,13 @@ class ZLibraryParser : SiteParser {
             "z-library.sk",
             "z-lib.is"
         )
+
+        internal fun isNoResultsPage(html: String): Boolean {
+            val text = Jsoup.parse(html).text()
+            return text.contains("On your request nothing has been found", ignoreCase = true) ||
+                text.contains("По вашему запросу ничего не найдено", ignoreCase = true) ||
+                text.contains("По вашему запиту нічого не знайдено", ignoreCase = true)
+        }
     }
 
     override suspend fun search(query: String, domain: String, doh: DohHttpClient): SearchOutcome {
@@ -48,6 +55,13 @@ class ZLibraryParser : SiteParser {
             if (html.length < 2000) {
                 AppLogger.i(TAG, "HTML too small (${html.length}), trying next")
                 continue
+            }
+
+            // Страница пустой выдачи содержит служебный скрытый z-bookcard. Его нельзя
+            // считать книгой: ссылка временная и при открытии возвращает на поиск.
+            if (isNoResultsPage(html)) {
+                AppLogger.i(TAG, "Domain $d explicitly reported no results")
+                return SearchOutcome.Empty
             }
 
             val results = parseHtml(html, d)
