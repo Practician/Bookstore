@@ -249,4 +249,46 @@ class ParsersTest {
         assertNotNull(bookLink)
         assertEquals("Заголовок", bookLink!!.text())
     }
+
+    @Test
+    fun annasArchive_detectsAntibotChallenge() {
+        val html = "<html><body>Checking your browser before accessing. Please wait a few seconds</body></html>"
+        assertTrue(AnnasArchiveParser.isChallengePage(html))
+    }
+
+    @Test
+    fun annasArchive_parseHtml_skipsCoverOnlyLinks() {
+        val html = """
+            <div>
+                <a href="/md5/abc123def456abc123def456abc123de"><img src="cover.webp"/></a>
+                <a href="/md5/abc123def456abc123def456abc123de">Речной Князь</a>
+                <a href="/search?q=Автор">Сергей Лукьяненко</a>
+            </div>
+        """.trimIndent()
+
+        val results = AnnasArchiveParser().parseHtml(html, "annas-archive.gd")
+        assertEquals(1, results.size)
+        assertEquals("Речной Князь", results[0].title)
+        assertEquals("https://annas-archive.gd/md5/abc123def456abc123def456abc123de", results[0].pageUrl)
+    }
+
+    @Test
+    fun librainParser_parsesCurrentCardsAndBuildsAbsoluteUrls() {
+        val html = """
+            <div class="search-results-list">
+                <div class="card">
+                    <a href="/storage/books/covers/book.webp"><img alt="Обложка"/></a>
+                    <p class="fw-bold"><a href="/uzasy-i-mistika/novyi-dozor">Новый Дозор</a></p>
+                    <p class="text-muted small">Сергей Лукьяненко</p>
+                    <a href="/uzasy-i-mistika/novyi-dozor">Читать</a>
+                </div>
+            </div>
+        """.trimIndent()
+
+        val results = LibrainParser().parseHtml(html, "librain.ru")
+        assertEquals(1, results.size)
+        assertEquals("Новый Дозор", results[0].title)
+        assertEquals("Сергей Лукьяненко", results[0].author)
+        assertEquals("https://librain.ru/uzasy-i-mistika/novyi-dozor", results[0].pageUrl)
+    }
 }

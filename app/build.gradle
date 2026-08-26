@@ -6,6 +6,11 @@ plugins {
     id 'org.jetbrains.kotlin.plugin.serialization'
 }
 
+def releaseStoreFilePath = System.getenv('RELEASE_STORE_FILE') ?: findProperty('RELEASE_STORE_FILE') ?: '../release-key.jks'
+def releaseStorePassword = System.getenv('RELEASE_STORE_PASSWORD') ?: findProperty('RELEASE_STORE_PASSWORD')
+def releaseKeyAlias = System.getenv('RELEASE_KEY_ALIAS') ?: findProperty('RELEASE_KEY_ALIAS') ?: 'bookstore-key'
+def releaseKeyPassword = System.getenv('RELEASE_KEY_PASSWORD') ?: findProperty('RELEASE_KEY_PASSWORD') ?: releaseStorePassword
+
 android {
     namespace 'com.bookparser.app'
     compileSdk 34
@@ -14,8 +19,8 @@ android {
         applicationId "com.bookparser.app"
         minSdk 26
         targetSdk 34
-        versionCode 42
-        versionName "7.41"
+        versionCode 43
+        versionName "7.42"
         
         vectorDrawables { 
             useSupportLibrary = true
@@ -24,10 +29,10 @@ android {
 
     signingConfigs {
         release {
-            storeFile file(RELEASE_STORE_FILE)
-            storePassword RELEASE_STORE_PASSWORD
-            keyAlias RELEASE_KEY_ALIAS
-            keyPassword RELEASE_KEY_PASSWORD
+            storeFile file(releaseStoreFilePath)
+            if (releaseStorePassword) storePassword releaseStorePassword
+            keyAlias releaseKeyAlias
+            if (releaseKeyPassword) keyPassword releaseKeyPassword
         }
     }
 

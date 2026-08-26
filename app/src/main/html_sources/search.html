@@ -460,6 +460,7 @@ let domains   = { ...DEFAULT_DOMAINS };
 let selected  = new Set(['flibusta','annas','zlib','librain']);
 let allResults = [];    // { title, author, source, formats: [{label, url, size}], pageUrl }
 let pendingSites = 0;   // sites still loading
+let finishedSites = new Set();
 let searchQuery = '';
 
 // ════════════════════════════════════════
@@ -513,6 +514,7 @@ function startSearch() {
   searchQuery = q;
   allResults = [];
   pendingSites = selected.size;
+  finishedSites = new Set();
 
   // Reset UI
   document.getElementById('resultsSection').classList.remove('show');
@@ -557,6 +559,7 @@ function stopSearch() {
   selected.forEach(siteId => {
     const pstat = document.getElementById('pstat-' + siteId);
     if (pstat && pstat.className.includes('loading')) {
+      finishedSites.add(siteId);
       pstat.textContent = 'Остановлено'; pstat.className = 'progress-status error';
       pendingSites--;
     }
@@ -589,7 +592,9 @@ function setSearchBtnLoading(on) {
 
 // Called by Kotlin when results for one site are ready
 window.onSiteResults = function(siteId, jsonStr) {
-  console.error('[SR] onSiteResults ' + siteId + ': ' + (typeof jsonStr === 'string' ? jsonStr.slice(0, 200) : JSON.stringify(jsonStr).slice(0, 200)));
+  if (finishedSites.has(siteId)) return;
+  finishedSites.add(siteId);
+  console.log('[SR] onSiteResults ' + siteId + ': ' + (typeof jsonStr === 'string' ? jsonStr.slice(0, 200) : JSON.stringify(jsonStr).slice(0, 200)));
   try {
     const results = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
     const pstat = document.getElementById('pstat-' + siteId);
@@ -615,7 +620,9 @@ window.onSiteResults = function(siteId, jsonStr) {
 };
 
 window.onSiteError = function(siteId, msg) {
-  console.error('[SR] onSiteError ' + siteId + ': ' + msg);
+  if (finishedSites.has(siteId)) return;
+  finishedSites.add(siteId);
+  console.warn('[SR] onSiteError ' + siteId + ': ' + msg);
   const pstat = document.getElementById('pstat-' + siteId);
   if (pstat) { pstat.textContent = 'Ошибка: ' + (msg || 'недоступен'); pstat.className = 'progress-status error'; }
   pendingSites--;
