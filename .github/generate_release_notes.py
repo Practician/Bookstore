@@ -9,7 +9,8 @@ content = f"""### 📖 Книжная лавка (Bookstore) — Комбайн 
 - 📚 Универсальный парсер книг (FB2, FB2.ZIP, EPUB, PDF)
 - 🌐 Интеллектуальный переводчик (Gemini AI, Google PA, Edge Free, Custom AI)
 - 🤖 Автоматизация публикации на форум 4PDA
-- 🔍 Поиск по библиотекам (Флибуста, Anna's Archive, GigaBooks, ReadToday, Z-Library)
+- 🔍 Поиск по четырём источникам: Флибуста, Anna's Archive, Z-Library и Librain
+- 📥 Доступные действия зависят от источника: скачивание FB2/EPUB, ссылка на файл или переход на страницу книги
 - 🎨 UI: Современная тёмная тема Glassmorphism
 
 **Требования:**
